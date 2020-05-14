@@ -66,28 +66,28 @@ func TestCallByName(t *testing.T) {
 	}
 	ctx := context.Background()
 	script := tengox.NewScript([]byte(module))
-	err := script.CompileRun()
+	compl, err := script.CompileRun()
 	require.NoError(t, err)
 	for i := 0; i < 3; i++ {
-		var scr *tengox.Script
+		var comp *tengox.Compiled
 		if i == 0 {
 			// use same script for each test
-			scr = script
+			comp = compl
 		} else if i == 1 {
 			// create script for each test
-			scr = tengox.NewScript([]byte(module))
-			err := scr.CompileRun()
+			scr := tengox.NewScript([]byte(module))
+			comp, err = scr.CompileRun()
 			require.NoError(t, err)
 		} else {
 			// use clone
-			scr = script.Clone()
+			comp = compl.Clone()
 		}
 		for _, test := range tests {
-			result, err := scr.CallByName(test.fn, test.args...)
+			result, err := comp.CallByName(test.fn, test.args...)
 			require.NoError(t, err)
 			require.Equal(t, test.ret, result)
 
-			resultx, err := scr.CallByNameContext(ctx, test.fn, test.args...)
+			resultx, err := comp.CallByNameContext(ctx, test.fn, test.args...)
 			require.NoError(t, err)
 			require.Equal(t, test.ret, resultx)
 		}
@@ -103,33 +103,41 @@ pass(func(a) {
 	return a * b
 })
 `
-
 	scr := tengox.NewScript([]byte(callbackModule))
 
 	var callback *tengox.Callback
 	scr.Add("pass", &tengo.UserFunction{
 		Value: func(args ...tengo.Object) (tengo.Object, error) {
-			callback = scr.MakeCallback(args[0])
+			callback = tengox.NewCallback(args[0])
 			return tengo.UndefinedValue, nil
 		},
 	})
 
-	err := scr.CompileRun()
+	compl, err := scr.CompileRun()
 	require.NoError(t, err)
-
+	require.NotNil(t, callback)
+	// unset *Compiled throws error
 	result, err := callback.Call(3)
+	require.Error(t, err)
+
+	// Set *Compiled before Call
+	result, err = callback.Set(compl).Call(3)
 	require.NoError(t, err)
 	require.Equal(t, int64(6), result)
 
-	result, err = callback.Call(5)
+	result, err = callback.Set(compl).Call(5)
 	require.NoError(t, err)
 	require.Equal(t, int64(10), result)
 
 	// Modify the global and check the new value is reflected in the function
-	scr.Set("b", 3)
-	result, err = callback.Call(5)
+	compl.Set("b", 3)
+	result, err = callback.Set(compl).Call(5)
 	require.NoError(t, err)
 	require.Equal(t, int64(15), result)
+
+	c := callback.Set(compl)
+	resultx, err := c.CallContext(context.Background(), 5)
+	require.Equal(t, result, resultx)
 }
 
 func TestClosure(t *testing.T) {
@@ -146,18 +154,18 @@ mul3 := mulClosure(3)
 
 	scr := tengox.NewScript([]byte(closureModule))
 
-	err := scr.CompileRun()
+	compl, err := scr.CompileRun()
 	require.NoError(t, err)
 
-	result, err := scr.CallByName("mul2", 3)
+	result, err := compl.CallByName("mul2", 3)
 	require.NoError(t, err)
 	require.Equal(t, int64(6), result)
 
-	result, err = scr.CallByName("mul2", 5)
+	result, err = compl.CallByName("mul2", 5)
 	require.NoError(t, err)
 	require.Equal(t, int64(10), result)
 
-	result, err = scr.CallByName("mul3", 5)
+	result, err = compl.CallByName("mul3", 5)
 	require.NoError(t, err)
 	require.Equal(t, int64(15), result)
 }
@@ -165,16 +173,16 @@ mul3 := mulClosure(3)
 func TestContext(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	err := tengox.NewScript([]byte("")).CompileRunContext(ctx)
+	compl, err := tengox.NewScript([]byte("")).CompileRunContext(ctx)
 	require.Error(t, err)
 	require.Equal(t, context.Canceled.Error(), err.Error())
 
 	ctx, cancel = context.WithTimeout(context.Background(), 0)
 	defer cancel()
 	scr := tengox.NewScript([]byte(module))
-	err = scr.CompileRunContext(context.Background())
+	compl, err = scr.CompileRunContext(context.Background())
 	require.NoError(t, err)
-	_, err = scr.CallByNameContext(ctx, "square", 2)
+	_, err = compl.CallByNameContext(ctx, "square", 2)
 	require.Error(t, err)
 	require.Equal(t, context.DeadlineExceeded.Error(), err.Error())
 }
@@ -184,17 +192,17 @@ func TestImportCall(t *testing.T) {
 	scr := tengox.NewScript([]byte(module))
 	mm := stdlib.GetModuleMap(stdlib.AllModuleNames()...)
 	scr.SetImports(mm)
-	err := scr.CompileRun()
+	compl, err := scr.CompileRun()
 	require.NoError(t, err)
-	v, err := scr.CallByName("contains", "foo bar", "bar")
+	v, err := compl.CallByName("contains", "foo bar", "bar")
 	require.NoError(t, err)
 	require.Equal(t, true, v)
 
-	v, err = scr.CallByName("contains", "foo bar", "baz")
+	v, err = compl.CallByName("contains", "foo bar", "baz")
 	require.NoError(t, err)
 	require.Equal(t, false, v)
 
-	v, err = scr.CallByName("containsX", "foo bar", "bar")
+	v, err = compl.CallByName("containsX", "foo bar", "bar")
 	require.True(t, strings.Contains(err.Error(), "not found"))
 }
 
@@ -228,20 +236,20 @@ each([a, b, c, d], f)`
 	require.NoError(t, err)
 
 	// compile and run the script
-	err = script.CompileRunContext(context.Background())
+	compl, err := script.CompileRunContext(context.Background())
 	require.NoError(t, err)
 
 	// retrieve values
-	sum := script.Get("sum")
-	mul := script.Get("mul")
+	sum := compl.Get("sum")
+	mul := compl.Get("mul")
 	require.Equal(t, 22, sum.Int())
 	require.Equal(t, 288, mul.Int())
 
-	_, err = script.CallByName("f", 2)
+	_, err = compl.CallByName("f", 2)
 	require.NoError(t, err)
 
-	sum = script.Get("sum")
-	mul = script.Get("mul")
+	sum = compl.Get("sum")
+	mul = compl.Get("mul")
 	require.Equal(t, 22+2, sum.Int())
 	require.Equal(t, 288*2, mul.Int())
 
@@ -257,7 +265,7 @@ each([a, b, c, d], f)`
 		},
 	}
 	nums := []interface{}{1, 2, 3, 4}
-	_, err = script.CallByName("each", nums, eachf)
+	_, err = compl.CallByName("each", nums, eachf)
 	require.NoError(t, err)
 	require.Equal(t, 4, len(args))
 	for i, v := range args {
@@ -268,16 +276,16 @@ each([a, b, c, d], f)`
 
 func TestGetAll(t *testing.T) {
 	script := tengox.NewScript([]byte(module))
-	err := script.CompileRunContext(context.Background())
+	compl, err := script.CompileRunContext(context.Background())
 	require.NoError(t, err)
-	vars := script.GetAll()
+	vars := compl.GetAll()
 	varsMap := make(map[string]bool)
 	for _, v := range vars {
 		varsMap[v.Name()] = true
 	}
 	names := []string{"add", "mul", "square", "fib", "stringer"}
 	for _, v := range names {
-		require.True(t, script.IsDefined(v))
+		require.True(t, compl.IsDefined(v))
 		require.True(t, varsMap[v])
 	}
 }
