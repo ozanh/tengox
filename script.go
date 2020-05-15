@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"sync"
 
 	"github.com/d5/tengo/v2"
@@ -18,6 +19,7 @@ const reservedVar = "$out"
 // Script is used to call callable Tengo objects from Go.
 // Methods are derived from Tengo's Script type. Unlike Tengo.
 type Script struct {
+	trace     io.Writer
 	modules   *tengo.ModuleMap
 	variables map[string]*tengo.Variable
 	src       []byte
@@ -62,7 +64,7 @@ func (s *Script) compile(ctx context.Context) (*Compiled, error) {
 	out := symbolTable.Define(reservedVar)
 	globals[out.Index] = tengo.UndefinedValue
 
-	cc := tengo.NewCompiler(srcFile, symbolTable, nil, s.modules, nil)
+	cc := tengo.NewCompiler(srcFile, symbolTable, nil, s.modules, s.trace)
 	if err := cc.Compile(file); err != nil {
 		return nil, err
 	}
@@ -165,6 +167,11 @@ func (s *Script) SetImports(modules *tengo.ModuleMap) {
 // exceeds this limit.
 func (s *Script) SetMaxAllocs(n int64) {
 	s.maxAllocs = n
+}
+
+// Trace set a tracer for compiler and VM for debugging purposes.
+func (s *Script) Trace(w io.Writer) {
+	s.trace = w
 }
 
 // Compiled is a compiled instance of the user script. Use Script.CompileRun()
