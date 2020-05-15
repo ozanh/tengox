@@ -43,7 +43,6 @@ fib := func(x) {
 	return fib(x-1) + fib(x-2)
 }
 
-// builtins must be wrapped like this since they are not in globals
 stringer := func(s) {
 	return string(s)
 }
