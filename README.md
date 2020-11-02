@@ -1,4 +1,7 @@
 # tengox
+
+> I archived this repo in favor of a new script language [uGO](https://github.com/ozanh/ugo) for Go.
+
 Experimental features for [Tengo Scripting Language](https://github.com/d5/tengo)
 
 A special thanks to [Tom Gascoigne](https://github.com/tgascoigne) for his contribution.
